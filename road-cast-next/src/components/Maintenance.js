@@ -1,7 +1,48 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 
-import { SprayCan, Gauge, Fuel, Droplets, Motorbike, Wrench, Download, Upload } from 'lucide-react';
+import { SprayCan, Gauge, Fuel, Droplets, Motorbike, Wrench, Download, Upload, FileText, Paperclip } from 'lucide-react';
+
+const getXmlText = (element, localName) =>
+    element.getElementsByTagNameNS('*', localName)[0]?.textContent?.trim() || '';
+
+const parseMaintenanceInvoice = (xmlText) => {
+    const document = new DOMParser().parseFromString(xmlText, 'application/xml');
+    if (document.getElementsByTagName('parsererror').length > 0 ||
+        document.documentElement.localName !== 'Invoice') {
+        throw new Error('The selected file is not a valid UBL invoice XML.');
+    }
+
+    const supplierParty = document.getElementsByTagNameNS('*', 'AccountingSupplierParty')[0];
+    const supplierName = supplierParty ? getXmlText(supplierParty, 'Name') : '';
+    const issueDate = getXmlText(document, 'IssueDate');
+    const invoiceNumber = getXmlText(document, 'ID');
+    const amount = getXmlText(document, 'PayableAmount');
+    const descriptions = Array.from(document.getElementsByTagNameNS('*', 'InvoiceLine'))
+        .map((line) => getXmlText(line, 'Description') || getXmlText(line, 'Name'))
+        .filter(Boolean);
+
+    return {
+        date: /^\d{4}-\d{2}-\d{2}$/.test(issueDate) ? issueDate : '',
+        supplier: supplierName,
+        invoiceNumber,
+        amount: amount && Number.isFinite(Number(amount)) ? amount : '',
+        description: [...new Set(descriptions)].join('\n')
+    };
+};
+
+const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+        if (typeof reader.result === 'string') {
+            resolve(reader.result);
+        } else {
+            reject(new Error('The selected PDF could not be read.'));
+        }
+    };
+    reader.onerror = () => reject(new Error('The selected PDF could not be read.'));
+    reader.readAsDataURL(file);
+});
 
 export default function Maintenance() {
     const [entries, setEntries] = useState([]);
@@ -11,6 +52,11 @@ export default function Maintenance() {
     const [liters, setLiters] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [description, setDescription] = useState('');
+    const [supplier, setSupplier] = useState('');
+    const [invoiceNumber, setInvoiceNumber] = useState('');
+    const [amount, setAmount] = useState('');
+    const [pdfFile, setPdfFile] = useState(null);
+    const [formMessage, setFormMessage] = useState('');
 
     useEffect(() => {
         const saved = localStorage.getItem('maintenanceEntries');
@@ -30,24 +76,81 @@ export default function Maintenance() {
         clean: { label: 'Cleaning', icon: Droplets },
         general: { label: 'General', icon: Wrench }
     };
+    const lastOdometer = entries.find((entry) => entry.km != null);
 
-    const handleSubmit = (e) => {
+    const importInvoiceXml = (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            try {
+                if (typeof reader.result !== 'string') {
+                    throw new Error('The selected XML file could not be read.');
+                }
+                const invoice = parseMaintenanceInvoice(reader.result);
+                setTaskType('general');
+                setDate(invoice.date || new Date().toISOString().split('T')[0]);
+                setSupplier(invoice.supplier);
+                setInvoiceNumber(invoice.invoiceNumber);
+                setAmount(invoice.amount);
+                setDescription(invoice.description);
+                setFormMessage('Invoice details loaded. Review them, add the odometer if known, and attach the PDF before saving.');
+            } catch (error) {
+                setFormMessage(error instanceof Error ? error.message : 'The invoice XML could not be read.');
+            }
+        };
+        reader.onerror = () => setFormMessage('The selected XML file could not be read.');
+        reader.readAsText(file);
+    };
+
+    const handleSubmit = async (e) => {
         e.preventDefault();
+        setFormMessage('');
 
         const newEntry = {
             id: Date.now(),
             type: taskType,
-            km: parseFloat(km),
+            km: km.trim() ? parseFloat(km) : null,
             liters: taskType === 'fuel' ? parseFloat(liters) : null,
             date: date,
-            description: taskType === 'general' ? description : null
+            description: taskType === 'general' ? description : null,
+            supplier: taskType === 'general' ? supplier : null,
+            invoiceNumber: taskType === 'general' ? invoiceNumber : null,
+            amount: taskType === 'general' && amount.trim() ? parseFloat(amount) : null
         };
 
-        const updatedEntries = [newEntry, ...entries].sort((a, b) =>
-            new Date(b.date) - new Date(a.date)
-        );
-        setEntries(updatedEntries);
-        localStorage.setItem('maintenanceEntries', JSON.stringify(updatedEntries));
+        try {
+            if (pdfFile) {
+                const signature = await pdfFile.slice(0, 5).text();
+                if (signature !== '%PDF-') {
+                    setFormMessage('The selected attachment is not a valid PDF file.');
+                    return;
+                }
+                newEntry.attachment = {
+                    name: pdfFile.name,
+                    dataUrl: await readFileAsDataUrl(pdfFile)
+                };
+            }
+
+            const updatedEntries = [newEntry, ...entries].sort((a, b) =>
+                new Date(b.date) - new Date(a.date)
+            );
+            localStorage.setItem('maintenanceEntries', JSON.stringify(updatedEntries));
+            setEntries(updatedEntries);
+            setPdfFile(null);
+            setDescription('');
+            setSupplier('');
+            setInvoiceNumber('');
+            setAmount('');
+            setFormMessage('Maintenance entry saved.');
+        } catch (error) {
+            setFormMessage(error instanceof Error
+                ? `${error.message} The entry was not saved.`
+                : 'The entry could not be saved. Check available browser storage and try again.');
+            return;
+        }
 
         // Keep the KM value for next entry (user can adjust if needed)
         setLiters('');
@@ -56,8 +159,12 @@ export default function Maintenance() {
 
     const deleteEntry = (id) => {
         const updatedEntries = entries.filter(entry => entry.id !== id);
-        setEntries(updatedEntries);
-        localStorage.setItem('maintenanceEntries', JSON.stringify(updatedEntries));
+        try {
+            localStorage.setItem('maintenanceEntries', JSON.stringify(updatedEntries));
+            setEntries(updatedEntries);
+        } catch (error) {
+            setFormMessage(error instanceof Error ? error.message : 'The entry could not be deleted.');
+        }
     };
 
     const formatDate = (dateString) => {
@@ -138,6 +245,20 @@ export default function Maintenance() {
                 </label>
             </div>
 
+            <div className="maintenance-import">
+                <label className="btn-add">
+                    <FileText size={20} />
+                    Import invoice XML
+                    <input
+                        type="file"
+                        accept=".xml,text/xml,application/xml"
+                        onChange={importInvoiceXml}
+                        style={{ display: 'none' }}
+                    />
+                </label>
+                <p>Load the date, supplier, invoice number, amount, and maintenance details from a UBL invoice.</p>
+            </div>
+
             <form className="maintenance-form" onSubmit={handleSubmit}>
                 <div className="form-group">
                     <label>Task</label>
@@ -169,9 +290,9 @@ export default function Maintenance() {
                         type="number"
                         value={km}
                         onChange={(e) => setKm(e.target.value)}
-                        required
+                        required={taskType !== 'general'}
                         className="form-input"
-                        placeholder={entries.length > 0 ? `Last: ${entries[0].km} km` : "Enter km"}
+                        placeholder={lastOdometer ? `Last: ${lastOdometer.km} km` : 'Enter km'}
                     />
                 </div>
 
@@ -190,19 +311,73 @@ export default function Maintenance() {
                 )}
 
                 {taskType === 'general' && (
-                    <div className="form-group">
-                        <label>Description</label>
-                        <input
-                            type="text"
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            className="form-input"
-                            placeholder="Enter Description"
-                        />
-                    </div>
+                    <>
+                        <div className="form-group">
+                            <label>Description</label>
+                            <textarea
+                                value={description}
+                                onChange={(e) => setDescription(e.target.value)}
+                                className="form-input"
+                                placeholder="Enter maintenance details"
+                                rows={5}
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Workshop / supplier</label>
+                            <input
+                                type="text"
+                                value={supplier}
+                                onChange={(e) => setSupplier(e.target.value)}
+                                className="form-input"
+                                placeholder="Optional"
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Invoice number</label>
+                            <input
+                                type="text"
+                                value={invoiceNumber}
+                                onChange={(e) => setInvoiceNumber(e.target.value)}
+                                className="form-input"
+                                placeholder="Optional"
+                            />
+                        </div>
+                        <div className="form-group">
+                            <label>Amount (€)</label>
+                            <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={amount}
+                                onChange={(e) => setAmount(e.target.value)}
+                                className="form-input"
+                                placeholder="Optional"
+                            />
+                        </div>
+                        <div className="form-group">
+                            <span className="pdf-picker-label">Invoice PDF</span>
+                            <div className="pdf-file-picker">
+                                <input
+                                    id="maintenance-pdf"
+                                    type="file"
+                                    accept="application/pdf,.pdf"
+                                    onChange={(e) => setPdfFile(e.target.files?.[0] || null)}
+                                    className="pdf-file-input"
+                                />
+                                <label className="pdf-file-button" htmlFor="maintenance-pdf">
+                                    <Paperclip size={18} />
+                                    Choose PDF
+                                </label>
+                                <span className="selected-file">
+                                    {pdfFile ? pdfFile.name : 'No file selected'}
+                                </span>
+                            </div>
+                        </div>
+                    </>
                 )}
 
                 <button type="submit" className="btn-add">Add Entry</button>
+                {formMessage && <p className="maintenance-message" role="status">{formMessage}</p>}
             </form>
 
             <div className="maintenance-history">
@@ -212,7 +387,8 @@ export default function Maintenance() {
                 ) : (
                     <div className="entries-list">
                         {entries.map(entry => {
-                            const IconComponent = taskTypes[entry.type].icon;
+                            const task = taskTypes[entry.type] || taskTypes.general;
+                            const IconComponent = task.icon;
                             return (
                                 <div key={entry.id} className="entry-card">
                                     <div className="entry-header">
@@ -222,7 +398,7 @@ export default function Maintenance() {
                                                 size={24}
                                                 strokeWidth={2}
                                             />
-                                            <span className="entry-type">{taskTypes[entry.type].label}</span>
+                                            <span className="entry-type">{task.label}</span>
                                         </div>
                                         <button
                                             onClick={() => deleteEntry(entry.id)}
@@ -233,12 +409,28 @@ export default function Maintenance() {
                                     </div>
                                     <div className="entry-details">
                                         <span className="entry-date">{formatDate(entry.date)}</span>
-                                        <span className="entry-km">{entry.km} km</span>
+                                        {entry.km != null && <span className="entry-km">{entry.km} km</span>}
                                         {entry.liters && (
                                             <span className="entry-liters">{entry.liters} L</span>
                                         )}
+                                        {entry.supplier && <span>{entry.supplier}</span>}
+                                        {entry.invoiceNumber && <span>Invoice {entry.invoiceNumber}</span>}
+                                        {entry.amount != null && (
+                                            <span>{new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(entry.amount)}</span>
+                                        )}
                                         {entry.description && (
                                             <span className="entry-description">{entry.description}</span>
+                                        )}
+                                        {entry.attachment?.dataUrl && (
+                                            <a
+                                                className="entry-attachment"
+                                                href={entry.attachment.dataUrl}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                            >
+                                                <Paperclip size={16} />
+                                                View {entry.attachment.name || 'attached PDF'}
+                                            </a>
                                         )}
                                     </div>
                                 </div>

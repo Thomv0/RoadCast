@@ -164,6 +164,25 @@ code {
     border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.maintenance-import {
+    margin-bottom: 20px;
+    color: #aaa;
+    text-align: center;
+}
+
+.maintenance-import .btn-add {
+    width: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.maintenance-import p {
+    font-size: 0.85rem;
+}
+
 .form-group {
     margin-bottom: 15px;
 }
@@ -186,6 +205,77 @@ code {
     font-size: 1rem;
     font-family: inherit;
     box-sizing: border-box;
+}
+
+.pdf-picker-label {
+    display: block;
+    color: #aaa;
+    margin-bottom: 5px;
+    font-size: 0.9rem;
+}
+
+.pdf-file-picker {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    min-height: 44px;
+    padding: 8px;
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 10px;
+}
+
+.pdf-file-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    clip-path: inset(50%);
+    border: 0;
+}
+
+.pdf-file-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 9px 13px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.14);
+    color: white;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+.pdf-file-button:hover {
+    background-color: rgba(255, 255, 255, 0.24);
+    border-color: rgba(255, 255, 255, 0.35);
+}
+
+.pdf-file-input:focus-visible + .pdf-file-button {
+    outline: 2px solid #9dcaff;
+    outline-offset: 2px;
+}
+
+.selected-file {
+    min-width: 0;
+    color: #ccc;
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+}
+
+.maintenance-message {
+    margin-bottom: 0;
+    color: #ccc;
+    font-size: 0.9rem;
 }
 
 .form-select:focus,
@@ -285,6 +375,8 @@ code {
 
 .entry-details {
     display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 15px;
     color: #aaa;
     font-size: 0.9rem;
@@ -309,6 +401,19 @@ code {
     color: #ccc;
     font-size: 0.85rem;
     font-style: italic;
+    white-space: pre-line;
+}
+
+.entry-attachment {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #9dcaff;
+    text-decoration: none;
+}
+
+.entry-attachment:hover {
+    text-decoration: underline;
 }
 
 /* DataCircle.css */
